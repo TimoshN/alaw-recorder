@@ -3,6 +3,7 @@ function createAudioContext() {
     return new Promise( async (resolve, reject)=>{
         try {
             let callback = ()=>{};
+            let callbackAnalyzer =()=>{};
             let _microphone;
             let _stream;
 
@@ -16,6 +17,16 @@ function createAudioContext() {
             // Adding an AudioWorkletProcessor
             // from another script with addModule method
             await audioContext.audioWorklet.addModule('wav_recorder/audioProcessor.js')
+
+
+            let analyserNode = new AnalyserNode(audioContext, {
+                fftSize: 128,
+                smoothingTimeConstant: 0.5,
+            });
+
+            let dataArray = new Uint8Array(analyserNode.frequencyBinCount);
+
+            let interval;
 
             // Creating AudioWorkletNode sending
             // context and name of processor registered
@@ -35,41 +46,24 @@ function createAudioContext() {
                         event: 'started'
                     })
                 } else if (data.eventType == "stop") {
+
+                    clearInterval(interval)
+                    interval=null;
+
                     console.log("RECORDING STOPPED");
                     node.disconnect(audioContext.destination)
-                    _microphone.disconnect(node)
+                    analyserNode.disconnect(node)
+                    _microphone.disconnect(analyserNode)
                     _stream.getTracks().forEach((el)=>{
                         el.stop()
                     })
 
+                    audioContext.suspend();
+
                     callback({
                         event: 'stopped'
                     })
-
-                    // audioContext.close()
-                    //     .then(()=>{console.log("audioContext.closed")})
-                    //     .catch(()=>{console.log("audioContext.errored")})
-                    //     .finally(()=>{
-                    //         callback({
-                    //             event: 'stopped'
-                    //         })
-                    //     })
                 } else if (data.eventType == "data") {
-                    // if (performance.now() - startTime > 5000) {
-                    //     recording = false;
-                    //     node.port.postMessage({
-                    //         eventType: "stopRecording",
-                    //     });
-                    // }
-
-                    // if (isFirstPackage) {
-                    //     isFirstPackage = false
-
-                    //     const header = encodeWAV(true, 15000, 1)
-
-                    //     window.api.writeToStream(header);
-                    // }
-
                     const pcm = new Int16Array(floatTo16BitPCM(data.audioBuffer[0]).buffer);
                     // console.log("pcm ", pcm)
 
@@ -81,7 +75,6 @@ function createAudioContext() {
                         event: 'data',
                         data: alaw
                     })
-                    // window.api.writeToStream(alaw)
                 }
             }
 
@@ -90,14 +83,24 @@ function createAudioContext() {
 
             resolve({
                 connect: (stream)=>{
+
+                    audioContext.resume();
+
                     _stream = stream;
                     _microphone = audioContext.createMediaStreamSource(_stream)
 
                     // Now this is the way to
                     // connect our microphone to
                     // the AudioWorkletNode and output from audioContext
-                    _microphone.connect(node)
-                    node.connect(audioContext.destination)
+                    _microphone
+                        .connect(analyserNode)
+                        .connect(node)
+                        .connect(audioContext.destination)
+
+                    interval = setInterval(()=>{
+                        analyserNode.getByteFrequencyData(dataArray)
+                        callbackAnalyzer(dataArray);
+                    }, 50)
                 },
                 startRecording: ()=>{
                     node.port.postMessage({
@@ -111,6 +114,9 @@ function createAudioContext() {
                 },
                 setCallback: (func)=>{
                     callback = func
+                },
+                setCallbackAnalyzer: (func)=>{
+                    callbackAnalyzer = func
                 }
             })
         } catch(e) {
@@ -121,6 +127,7 @@ function createAudioContext() {
 
 
 let haveContext
+let canvasCtx
 /**
  * Method used to create a comunication between
  * AudioWorkletNode, Microphone and AudioWorkletProcessor
@@ -136,6 +143,12 @@ function onMicrophoneGranted(stream) {
 
             if (!haveContext) {
                 haveContext = await createAudioContext()
+            }
+
+            if (!canvasCtx) {
+                let canvas = document.getElementById('analyzer');
+                canvasCtx = canvas.getContext('2d');
+                canvasCtx.clearRect(0, 0, 200, 50);
             }
 
             haveContext.connect(stream)
@@ -157,6 +170,26 @@ function onMicrophoneGranted(stream) {
                     window.api.closeStream()
                 }
             })
+            haveContext.setCallbackAnalyzer((dataArray)=>{
+                if(!canvasCtx){ return }
+
+                canvasCtx.clearRect(0, 0, 200, 100);
+
+                let barWidth = (200 / dataArray.length) //* 2.5;
+                let barHeight;
+                let x = 0;
+
+                //ctx.fillRect(x, y, width, height);
+
+                for(let i = 0; i < dataArray.length; i++) {
+                    barHeight = dataArray[i]/255*50
+
+                    canvasCtx.fillStyle = `rgb(100,100,${(100+(dataArray[i]/255*125))})`;
+                    canvasCtx.fillRect(x, 100-barHeight, barWidth, barHeight);
+
+                    x += barWidth;
+                }
+            })
 
             haveContext.startRecording()
 
@@ -172,14 +205,6 @@ function stopRecording() {
     haveContext.stopRecording()
 }
 
-// pcm16: function(value) {
-//     value = Math.max(-1, Math.min(value, +1));
-//     value = value < 0 ? value * 32768 : value * 32767;
-//     value = Math.round(value)|0;
-//     dataView.setInt16(pos, value, true);
-//     pos += 2;
-//   },
-
 function floatTo16BitPCM(input) {
     let buffer = new ArrayBuffer(input.length*2)
     let view = new DataView(buffer)
@@ -189,9 +214,6 @@ function floatTo16BitPCM(input) {
         let value = Math.max(-1, Math.min(input[i], +1));
         value = value < 0 ? value * 32768 : value * 32767;
         value = Math.round(value)|0;
-
-        // console.log(buffer.byteLength, buffer.length, offset)
-
         view.setInt16(offset, value, true)
     }
 

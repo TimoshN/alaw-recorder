@@ -3,10 +3,6 @@
 // the name is "microphone"
 
 registerProcessor('microphone', class extends AudioWorkletProcessor {
-
-  _updateIntervalInMS
-  _nextUpdateFrame
-
   constructor () {
     super();
     this._stopTime = 999999999;

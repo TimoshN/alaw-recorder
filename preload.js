@@ -1,16 +1,15 @@
 const {contextBridge} = require("electron")
 const fs = require("fs")
 const { v4: uuidv4 } = require('uuid');
+const path = require('path')
 
-/**
- * @type {fs.WriteStream}
- */
+/** @type {fs.WriteStream} */
 let writableStream
 
 contextBridge.exposeInMainWorld("api", {
     writeToStream: (data)=>{
         if(!writableStream) {
-            writableStream = fs.createWriteStream(`${uuidv4()}.wav`)
+            writableStream = fs.createWriteStream(path.join(__dirname, 'output', `${uuidv4()}.wav`))
         }
         writableStream.write(data)
     },
