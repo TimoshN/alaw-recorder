@@ -8,10 +8,14 @@ let writableStream
 
 contextBridge.exposeInMainWorld("api", {
     writeToStream: (data)=>{
+        let filePath;
         if(!writableStream) {
-            writableStream = fs.createWriteStream(path.join(__dirname, 'output', `${uuidv4()}.wav`))
+            filePath = path.join(__dirname, 'output', `${uuidv4()}.wav`)
+            writableStream = fs.createWriteStream(filePath)
         }
         writableStream.write(data)
+
+        return filePath;
     },
     closeStream: ()=>{
         if(writableStream) {
